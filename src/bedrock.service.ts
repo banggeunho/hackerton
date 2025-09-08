@@ -12,7 +12,7 @@ export class BedrockService {
 
   constructor() {
     this.chatModel = new ChatBedrockConverse({
-      model: 'anthropic.claude-3-sonnet-20240229-v1:0',
+      model: 'apac.anthropic.claude-3-haiku-20240307-v1:0',
       region: 'ap-northeast-2',
       maxTokens: 1000,
       temperature: 0.7,
