@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a NestJS TypeScript starter project called "hackerton" - a fresh Node.js backend framework application using the latest NestJS v11 with TypeScript.
+This is a NestJS TypeScript starter project called "hackerton" - a fresh Node.js backend framework application using the latest NestJS v11 with TypeScript, integrated with AWS Bedrock using LangChain for AI/LLM capabilities.
 
 ## Common Commands
 
@@ -64,3 +64,45 @@ When adding new features:
 6. Run `npm run lint` and `npm run test` before committing
 
 The application follows standard NestJS patterns with dependency injection, decorators, and modular architecture.
+
+## AWS Bedrock Integration
+
+### Setup Requirements
+1. Copy `.env.example` to `.env` and configure AWS credentials:
+   ```
+   AWS_REGION=us-east-1
+   AWS_ACCESS_KEY_ID=your_access_key_here
+   AWS_SECRET_ACCESS_KEY=your_secret_key_here
+   ```
+
+2. Ensure your AWS account has access to Bedrock and the Claude models
+
+### Available Services
+- **BedrockService** (`src/bedrock.service.ts`): Core service for LangChain + Bedrock integration
+  - Uses Claude 3 Sonnet model by default
+  - Supports streaming responses
+  - Context-aware conversations
+
+### API Endpoints
+- `POST /bedrock/chat` - Basic chat with Claude
+- `POST /bedrock/chat-with-context` - Chat with additional context
+- `GET /bedrock/health` - Service health check
+
+### Usage Examples
+```typescript
+// Basic chat
+const response = await bedrockService.generateResponse('Hello, how are you?');
+
+// With system prompt
+const response = await bedrockService.generateResponse(
+  'Explain quantum computing', 
+  'You are a physics professor'
+);
+
+// With context
+const response = await bedrockService.generateWithContext(
+  'What is the main topic?',
+  ['Document content here...'],
+  'You are a helpful assistant'
+);
+```
