@@ -5,47 +5,31 @@ import { AllConfigType } from '../../../config';
 import { BedrockService } from '../../bedrock/bedrock.service';
 import { CoordinateDto, PlaceDto } from '../../../common/dto';
 import { ExternalServiceException } from '../../../common/exceptions';
+import {
+  NaverSearchService,
+  NaverLocalSearchItem,
+} from './naver-search.service';
 
 /**
  * Places service for searching and recommending places
- * Integrates with Kakao Local API and AI for intelligent recommendations
+ * Integrates with Kakao Local API, Naver Local Search API, and AI for intelligent recommendations
  */
 @Injectable()
 export class PlacesService {
   private readonly logger = new Logger(PlacesService.name);
   private readonly kakaoClient: AxiosInstance;
-  private readonly kakaoDirectionsClient: AxiosInstance;
-  private readonly naverClient: AxiosInstance;
 
   constructor(
     private readonly bedrockService: BedrockService,
+    private readonly naverSearchService: NaverSearchService,
     private configService: ConfigService<AllConfigType>,
   ) {
     const kakaoConfig = this.configService.get('kakao', { infer: true })!;
-    const naverConfig = this.configService.get('naver', { infer: true })!;
 
     this.kakaoClient = axios.create({
       baseURL: 'https://dapi.kakao.com/v2/local/search',
       headers: {
         Authorization: `KakaoAK ${kakaoConfig.restApiKey}`,
-      },
-      timeout: 15000,
-    });
-
-    // Separate client for Directions API
-    this.kakaoDirectionsClient = axios.create({
-      baseURL: 'https://apis-navi.kakaomobility.com',
-      headers: {
-        Authorization: `KakaoAK ${kakaoConfig.restApiKey}`,
-      },
-      timeout: 10000,
-    });
-
-    this.naverClient = axios.create({
-      baseURL: 'https://naveropenapi.apigw.ntruss.com/map-place/v1',
-      headers: {
-        'X-NCP-APIGW-API-KEY-ID': naverConfig.clientId,
-        'X-NCP-APIGW-API-KEY': naverConfig.clientSecret,
       },
       timeout: 15000,
     });
@@ -94,7 +78,7 @@ export class PlacesService {
   }
 
   /**
-   * Search places using Naver Maps API
+   * Search places using Naver Local Search API
    */
   async searchPlacesWithNaver(
     coordinates: CoordinateDto,
@@ -102,24 +86,30 @@ export class PlacesService {
     maxResults: number = 10,
   ): Promise<PlaceDto[]> {
     try {
-      this.logger.debug(`Searching places with Naver Maps: ${query}`);
+      this.logger.debug(`Searching places with Naver Local API: ${query}`);
 
-      const response = await this.naverClient.get('/search', {
-        params: {
-          query: query,
-          coordinate: `${coordinates.lng},${coordinates.lat}`,
-          format: 'json',
-          count: Math.min(maxResults, 20),
-        },
-      });
+      // Search using the new NaverSearchService
+      const response = await this.naverSearchService.searchLocal(
+        query,
+        Math.min(maxResults, 5), // Naver API limits to 5 results
+        'random', // Sort by rating/comment for better results
+      );
 
-      const places = response.data?.places || [];
+      if (!response.items || response.items.length === 0) {
+        this.logger.debug('No results from Naver Local API');
+        return [];
+      }
 
-      return places.map((place: any) =>
-        this.transformNaverPlace(place, coordinates),
+      this.logger.debug(response.items);
+
+      // Process and transform Naver results
+      const processedResults =
+        this.naverSearchService.processNaverResults(response);
+      return processedResults.map((item: NaverLocalSearchItem) =>
+        this.transformNaverPlace(item, coordinates),
       );
     } catch (error) {
-      this.logger.warn(`Naver Maps search failed: ${error.message}`, error);
+      this.logger.warn(`Naver Local API search failed: ${error}`, error);
       return []; // Return empty array instead of throwing to allow fallback
     }
   }
@@ -162,123 +152,7 @@ export class PlacesService {
   }
 
   /**
-   * Get AI-powered place recommendations with travel information
-   */
-  async getAIRecommendationsWithTravelInfo(
-    places: PlaceDto[],
-    placeType: string = 'restaurant',
-    preferences: string = '',
-    maxResults: number = 10,
-  ): Promise<PlaceDto[]> {
-    try {
-      if (places.length === 0) {
-        return [];
-      }
-
-      // Create enhanced context for AI recommendation including travel info
-      const placesContext = places
-        .map(
-          (place, index) =>
-            `${index + 1}. ${place.name}
-` +
-            `   주소: ${place.address}
-` +
-            `   카테고리: ${place.category || 'N/A'}
-` +
-            `   평점: ${place.rating || 'N/A'}
-` +
-            `   중심점으로부터 거리: ${place.distanceFromCenter ? Math.round(place.distanceFromCenter) + 'm' : 'N/A'}
-` +
-            (place.travelInfo
-              ? `   자동차 이동시간: ${place.travelInfo.drivingTime ? Math.round(place.travelInfo.drivingTime / 60) + '분' : 'N/A'}
-` +
-                `   도보 이동시간: ${place.travelInfo.walkingTime ? Math.round(place.travelInfo.walkingTime / 60) + '분' : 'N/A'}
-` +
-                `   자동차 이동거리: ${place.travelInfo.drivingDistance ? Math.round((place.travelInfo.drivingDistance / 1000) * 10) / 10 + 'km' : 'N/A'}
-`
-              : '') +
-            (place.phone
-              ? `   전화번호: ${place.phone}
-`
-              : ''),
-        )
-        .join('\n');
-
-      const systemPrompt = `당신은 한국의 장소 추천 전문가입니다. 
-주어진 장소들 중에서 사용자의 요구사항에 가장 적합한 곳들을 ${maxResults}개까지 추천해주세요.
-
-추천 기준:
-- 사용자 선호도와의 일치도
-- 접근성 (중심점으로부터의 거리 및 이동시간)
-- 평점 및 품질
-- 장소 유형과의 적합성
-- 교통 편의성 (자동차/도보 이동시간 고려)
-
-특별히 이동시간을 고려하여 추천해주세요:
-- 자동차 이용 시 15분 이내가 가장 좋음
-- 도보 이용 시 10분 이내가 가장 좋음
-- 이동시간이 길더라도 평점이나 특별한 이유가 있다면 추천 가능
-
-응답 형식은 JSON 배열로 해주세요:
-[
-  {
-    "placeIndex": 장소번호(1부터시작),
-    "recommendationScore": 추천점수(1-10),
-    "reason": "추천 이유를 한국어로 설명 (이동시간 포함)"
-  }
-]
-
-최대 ${maxResults}개까지만 추천하고, 추천점수가 높은 순으로 정렬해주세요.`;
-
-      const userPrompt = `장소 유형: ${placeType}
-사용자 선호사항: ${preferences || '특별한 선호사항 없음'}
-
-검색된 장소 목록 (이동시간 정보 포함):
-${placesContext}
-
-위 장소들 중에서 이동시간을 고려하여 추천해주세요.`;
-
-      this.logger.debug('Requesting AI recommendations with travel info');
-
-      const aiResponse = await this.bedrockService.generateResponse(
-        userPrompt,
-        systemPrompt,
-      );
-
-      // Parse AI response
-      const recommendations = this.parseAIRecommendations(aiResponse);
-
-      // Apply recommendations to places
-      const recommendedPlaces = recommendations
-        .filter((rec) => rec.placeIndex > 0 && rec.placeIndex <= places.length)
-        .map((rec) => {
-          const place = { ...places[rec.placeIndex - 1] };
-          place.recommendationReason = rec.reason;
-          return place;
-        })
-        .slice(0, maxResults);
-
-      this.logger.debug(
-        `AI recommended ${recommendedPlaces.length} places with travel info`,
-      );
-      return recommendedPlaces;
-    } catch (error) {
-      this.logger.warn(
-        'AI recommendation with travel info failed, falling back to basic recommendations',
-        error,
-      );
-      // Fallback to basic AI recommendations
-      return this.getAIRecommendations(
-        places,
-        placeType,
-        preferences,
-        maxResults,
-      );
-    }
-  }
-
-  /**
-   * Get AI-powered place recommendations (fallback method)
+   * Get AI-powered place recommendations
    */
   async getAIRecommendations(
     places: PlaceDto[],
@@ -299,7 +173,9 @@ ${placesContext}
             `   주소: ${place.address}\n` +
             `   카테고리: ${place.category || 'N/A'}\n` +
             `   평점: ${place.rating || 'N/A'}\n` +
-            `   중심점으로부터 거리: ${place.distanceFromCenter ? Math.round(place.distanceFromCenter) + 'm' : 'N/A'}\n`,
+            `   중심점으로부터 거리: ${place.distanceFromCenter ? Math.round(place.distanceFromCenter) + 'm' : 'N/A'}\n` +
+            (place.phone ? `   전화번호: ${place.phone}\n` : '') +
+            (place.description ? `   설명: ${place.description}\n` : ''),
         )
         .join('\n');
 
@@ -332,6 +208,8 @@ ${placesContext}
 위 장소들 중에서 추천해주세요.`;
 
       this.logger.debug('Requesting AI recommendations');
+      this.logger.debug(`System Prompt: ${systemPrompt}`);
+      this.logger.debug(`User Prompt: ${userPrompt}`);
 
       const aiResponse = await this.bedrockService.generateResponse(
         userPrompt,
@@ -384,25 +262,29 @@ ${placesContext}
    * Transform Naver place data to internal format
    */
   private transformNaverPlace(
-    naverPlace: any,
+    naverPlace: NaverLocalSearchItem,
     centerCoordinates: CoordinateDto,
   ): PlaceDto {
-    const coordinates: CoordinateDto = {
-      lat: parseFloat(naverPlace.y || naverPlace.lat),
-      lng: parseFloat(naverPlace.x || naverPlace.lng),
-    };
+    // Convert Naver coordinates to standard lat/lng format
+    const coordinates: CoordinateDto =
+      this.naverSearchService.convertNaverCoordinates(
+        naverPlace.mapx,
+        naverPlace.mapy,
+      );
 
     const distance = this.calculateDistance(centerCoordinates, coordinates);
 
     return {
-      name: naverPlace.name || naverPlace.title?.replace(/<[^>]*>/g, ''), // Remove HTML tags
-      address: naverPlace.address || naverPlace.roadAddress,
+      name: naverPlace.title, // Already cleaned by processNaverResults
+      address: naverPlace.address,
+      roadAddress: naverPlace.roadAddress || undefined,
       coordinates,
       category: naverPlace.category,
-      rating: naverPlace.rating ? parseFloat(naverPlace.rating) : undefined,
+      description: naverPlace.description || undefined,
       distanceFromCenter: Math.round(distance),
-      phone: naverPlace.telephone || naverPlace.phone || undefined,
-      url: naverPlace.link || naverPlace.homePageUrl || undefined,
+      phone: naverPlace.telephone || undefined,
+      url: naverPlace.link || undefined,
+      source: 'naver',
     };
   }
 
@@ -423,12 +305,14 @@ ${placesContext}
     return {
       name: kakaoPlace.place_name,
       address: kakaoPlace.address_name || kakaoPlace.road_address_name,
+      roadAddress: kakaoPlace.road_address_name || undefined,
       coordinates,
       category: kakaoPlace.category_name,
       rating: kakaoPlace.rating ? parseFloat(kakaoPlace.rating) : undefined,
       distanceFromCenter: Math.round(distance),
       phone: kakaoPlace.phone || undefined,
       url: kakaoPlace.place_url || undefined,
+      source: 'kakao',
     };
   }
 
@@ -469,140 +353,6 @@ ${placesContext}
   }
 
   /**
-   * Get travel time and distance using Kakao Directions API
-   */
-  async getTravelInfo(
-    origin: CoordinateDto,
-    destination: CoordinateDto,
-  ): Promise<{
-    drivingTime?: number;
-    drivingDistance?: number;
-    walkingTime?: number;
-    walkingDistance?: number;
-  }> {
-    try {
-      const travelInfo: any = {};
-
-      // Get driving directions
-      try {
-        const drivingResponse = await this.kakaoDirectionsClient.get(
-          '/v1/directions',
-          {
-            params: {
-              origin: `${origin.lng},${origin.lat}`,
-              destination: `${destination.lng},${destination.lat}`,
-              priority: 'RECOMMEND', // 추천 경로
-            },
-          },
-        );
-
-        const route = drivingResponse.data?.routes?.[0];
-        if (route) {
-          travelInfo.drivingTime = route.summary?.duration; // seconds
-          travelInfo.drivingDistance = route.summary?.distance; // meters
-        }
-      } catch {
-        this.logger.debug(
-          'Driving directions failed, using fallback calculation',
-        );
-        // Fallback: estimate based on straight-line distance
-        const straightDistance = this.calculateDistance(origin, destination);
-        travelInfo.drivingDistance = Math.round(straightDistance * 1.3); // 30% increase for roads
-        travelInfo.drivingTime = Math.round(travelInfo.drivingDistance / 15); // ~15m/s average speed
-      }
-
-      // Get walking directions using Kakao Maps Walking API
-      try {
-        const walkingResponse = await this.kakaoDirectionsClient.get(
-          '/v1/waypoints/directions',
-          {
-            params: {
-              origin: `${origin.lng},${origin.lat}`,
-              destination: `${destination.lng},${destination.lat}`,
-              waypoints: '',
-              priority: 'RECOMMEND',
-              car_fuel: 'GASOLINE',
-              car_hipass: false,
-              alternatives: false,
-              road_details: false,
-            },
-          },
-        );
-
-        const walkingRoute = walkingResponse.data?.routes?.[0];
-        if (walkingRoute) {
-          // Walking is typically 1/4 the speed of driving, adjust accordingly
-          travelInfo.walkingTime = Math.round(
-            (walkingRoute.summary?.duration || 0) * 4,
-          );
-          travelInfo.walkingDistance = walkingRoute.summary?.distance;
-        }
-      } catch {
-        this.logger.debug(
-          'Walking directions failed, using fallback calculation',
-        );
-        // Fallback: estimate walking time based on straight-line distance
-        const straightDistance = this.calculateDistance(origin, destination);
-        travelInfo.walkingDistance = Math.round(straightDistance * 1.2); // 20% increase for pedestrian paths
-        travelInfo.walkingTime = Math.round(travelInfo.walkingDistance / 1.4); // ~1.4m/s walking speed
-      }
-
-      return travelInfo;
-    } catch (error) {
-      this.logger.warn('Failed to get travel info', error);
-      // Return fallback calculations
-      const straightDistance = this.calculateDistance(origin, destination);
-      return {
-        drivingDistance: Math.round(straightDistance * 1.3),
-        drivingTime: Math.round((straightDistance * 1.3) / 15),
-        walkingDistance: Math.round(straightDistance * 1.2),
-        walkingTime: Math.round((straightDistance * 1.2) / 1.4),
-      };
-    }
-  }
-
-  /**
-   * Enhance places with travel information
-   */
-  async enhancePlacesWithTravelInfo(
-    places: PlaceDto[],
-    centerCoordinates: CoordinateDto,
-  ): Promise<PlaceDto[]> {
-    const enhancedPlaces = await Promise.all(
-      places.map(async (place) => {
-        try {
-          const travelInfo = await this.getTravelInfo(
-            centerCoordinates,
-            place.coordinates,
-          );
-
-          return {
-            ...place,
-            travelInfo: {
-              ...travelInfo,
-              // Add human-readable format for better AI processing
-              drivingTimeFormatted: travelInfo.drivingTime
-                ? `${Math.round(travelInfo.drivingTime / 60)}분`
-                : undefined,
-              walkingTimeFormatted: travelInfo.walkingTime
-                ? `${Math.round(travelInfo.walkingTime / 60)}분`
-                : undefined,
-            },
-          };
-        } catch (error) {
-          this.logger.warn(
-            `Failed to get travel info for ${place.name}`,
-            error,
-          );
-          return place; // Return original place if travel info fails
-        }
-      }),
-    );
-
-    return enhancedPlaces;
-  }
-
-  /**
    * Calculate distance between two coordinates in meters
    */
   private calculateDistance(
@@ -624,7 +374,7 @@ ${placesContext}
   }
 
   /**
-   * Get comprehensive place recommendations with travel information
+   * Get comprehensive place recommendations
    */
   async getPlaceRecommendations(
     coordinates: CoordinateDto,
@@ -640,6 +390,8 @@ ${placesContext}
       this.searchWithKakao(coordinates, placeType, preferences, radiusMeters),
       this.searchWithNaver(coordinates, placeType, preferences),
     ]);
+
+    this.logger.debug(naverPlaces)
 
     // Merge and deduplicate places from both sources
     allPlaces = this.mergePlaceSources(kakaoPlaces, naverPlaces);
@@ -657,15 +409,9 @@ ${placesContext}
       );
     }
 
-    // Enhance places with travel information
-    const placesWithTravelInfo = await this.enhancePlacesWithTravelInfo(
+    // Get AI recommendations
+    const recommendedPlaces = await this.getAIRecommendations(
       allPlaces,
-      coordinates,
-    );
-
-    // Get AI recommendations with enriched data
-    const recommendedPlaces = await this.getAIRecommendationsWithTravelInfo(
-      placesWithTravelInfo,
       placeType,
       preferences,
       maxResults,
@@ -711,7 +457,7 @@ ${placesContext}
   }
 
   /**
-   * Search places using Naver Maps API
+   * Search places using Naver Local Search API
    */
   private async searchWithNaver(
     coordinates: CoordinateDto,

@@ -192,43 +192,22 @@ export class PlaceDto {
   recommendationReason?: string;
 
   @ApiPropertyOptional({
-    description: 'Travel information from center point',
-    type: 'object',
-    properties: {
-      drivingTime: {
-        type: 'number',
-        description: 'Driving time in seconds',
-        example: 900,
-      },
-      drivingDistance: {
-        type: 'number',
-        description: 'Driving distance in meters',
-        example: 3500,
-      },
-      walkingTime: {
-        type: 'number',
-        description: 'Walking time in seconds',
-        example: 600,
-      },
-      walkingDistance: {
-        type: 'number',
-        description: 'Walking distance in meters',
-        example: 800,
-      },
-      transitTime: {
-        type: 'number',
-        description: 'Public transit time in seconds',
-        example: 1200,
-      },
-    },
+    description: 'Place description or additional information',
+    example: '맛있는 한식당으로 유명한 곳입니다.',
   })
-  travelInfo?: {
-    drivingTime?: number; // seconds
-    drivingDistance?: number; // meters
-    walkingTime?: number; // seconds
-    walkingDistance?: number; // meters
-    transitTime?: number; // seconds
-  };
+  description?: string;
+
+  @ApiPropertyOptional({
+    description: 'Data source (kakao, naver, etc.)',
+    example: 'naver',
+  })
+  source?: string;
+
+  @ApiPropertyOptional({
+    description: 'Road address (도로명 주소)',
+    example: '서울특별시 강남구 테헤란로 123',
+  })
+  roadAddress?: string;
 }
 
 /**
