@@ -40,10 +40,15 @@ async function bootstrap() {
   const config = new DocumentBuilder()
     .setTitle('Hackerton API')
     .setDescription(
-      'NestJS application with AWS Bedrock integration using LangChain',
+      'NestJS application with AWS Bedrock integration using LangChain and location-based AI recommendations',
     )
     .setVersion('1.0')
     .addTag('bedrock', 'AWS Bedrock AI service endpoints')
+    .addTag(
+      'location',
+      'Location-based services with AI-powered place recommendations',
+    )
+    .addServer('http://localhost:3000', 'Development server')
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
