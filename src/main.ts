@@ -1,14 +1,20 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import {
   GlobalExceptionFilter,
   SecurityExceptionFilter,
 } from './common/filters';
+import { AllConfigType } from './config';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+
+  // Get configuration service
+  const configService = app.get(ConfigService<AllConfigType>);
+  const appConfig = configService.get('app', { infer: true })!;
 
   // Configure global validation pipe
   app.useGlobalPipes(
@@ -29,7 +35,7 @@ async function bootstrap() {
   );
 
   // Configure global exception filters (order matters - most specific first)
-  const isProduction = process.env.NODE_ENV === 'production';
+  const isProduction = appConfig.nodeEnv === 'production';
 
   if (isProduction) {
     // In production, use security-focused filter for all exceptions
@@ -57,7 +63,7 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api', app, document);
 
-  const port = process.env.PORT || 3000;
+  const port = appConfig.port;
   await app.listen(port);
 
   console.log(`Application is running on: http://localhost:${port}`);
