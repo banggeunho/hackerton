@@ -1,14 +1,10 @@
 import { Module } from '@nestjs/common';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
-import { BedrockController } from './bedrock.controller';
-import { BedrockService } from './bedrock.service';
-import { LocationController } from './location.controller';
-import { LocationService, PlacesService } from './services';
+import { BedrockModule } from './modules/bedrock/bedrock.module';
+import { LocationModule } from './modules/location/location.module';
 
 @Module({
-  imports: [],
-  controllers: [AppController, BedrockController, LocationController],
-  providers: [AppService, BedrockService, LocationService, PlacesService],
+  imports: [BedrockModule, LocationModule],
+  controllers: [],
+  providers: [],
 })
 export class AppModule {}
