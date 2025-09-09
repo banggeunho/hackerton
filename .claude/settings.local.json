@@ -22,7 +22,8 @@
       "Bash(rm:*)",
       "Bash(cat:*)",
       "mcp__serena__search_for_pattern",
-      "WebFetch(domain:developers.naver.com)"
+      "WebFetch(domain:developers.naver.com)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []
