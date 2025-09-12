@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Logger, Post, Query } from '@nestjs/common';
+import { Body, Controller, Logger, Post } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { LocationService } from './services/location.service';
 import { PlacesService } from './services/places.service';
@@ -338,64 +338,6 @@ export class LocationController {
         'CENTER_POINT_FAILED',
         [error instanceof Error ? error.message : 'Unknown error'],
       );
-    }
-  }
-
-  @Get('debug-distance')
-  @ApiOperation({
-    summary: 'Debug Google Maps Distance Matrix API',
-    description: 'Test endpoint to debug distance calculations',
-  })
-  async debugDistance(
-    @Query('originLat') originLat: string,
-    @Query('originLng') originLng: string,
-    @Query('destLat') destLat: string,
-    @Query('destLng') destLng: string,
-  ) {
-    this.logger.log(
-      `Debug distance calculation from (${originLat}, ${originLng}) to (${destLat}, ${destLng})`,
-    );
-
-    try {
-      const origin = { lat: parseFloat(originLat), lng: parseFloat(originLng) };
-      const destination = {
-        lat: parseFloat(destLat),
-        lng: parseFloat(destLng),
-      };
-
-      // Test API key availability
-      const apiInfo = this.googleMapsService.getApiInfo();
-      this.logger.debug(`Google Maps API Info:`, apiInfo);
-
-      // Test distance calculation
-      const distances =
-        await this.googleMapsService.calculateDistanceBetweenCoordinates(
-          origin,
-          [destination],
-        );
-
-      return {
-        success: true,
-        timestamp: new Date().toISOString(),
-        apiInfo,
-        origin,
-        destination,
-        distances,
-        debug: {
-          originString: `${origin.lat},${origin.lng}`,
-          destinationString: `${destination.lat},${destination.lng}`,
-        },
-      };
-    } catch (error) {
-      this.logger.error('Debug distance calculation failed', error);
-      return {
-        success: false,
-        timestamp: new Date().toISOString(),
-        error: {
-          message: error instanceof Error ? error.message : 'Unknown error',
-          stack: error instanceof Error ? error.stack : undefined,
-        },
-      };
     }
   }
 }
