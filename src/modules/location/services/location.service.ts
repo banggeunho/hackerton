@@ -3,18 +3,19 @@ import { ConfigService } from '@nestjs/config';
 import axios, { AxiosInstance } from 'axios';
 import { AllConfigType } from '../../../config';
 import {
+  CenterPointDto,
   CoordinateDto,
   GeocodingResultDto,
-  CenterPointDto,
 } from '../../../common/dto';
 import {
-  ExternalServiceException,
   BusinessLogicException,
+  ExternalServiceException,
 } from '../../../common/exceptions';
 
 /**
- * Location service for geocoding and geographic calculations
- * Integrates with Kakao Maps API for address-to-coordinate conversion
+ * Location service implementing Step 1 of the 4-step algorithm
+ * - Address-to-coordinate conversion using Kakao/Naver APIs
+ * - Midpoint calculation for optimal center point
  */
 @Injectable()
 export class LocationService {

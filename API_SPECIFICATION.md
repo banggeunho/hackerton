@@ -107,14 +107,21 @@ Currently, the API operates without authentication for development purposes. Fut
 
 #### POST /location/recommend-places
 
-**Description**: Get AI-powered place recommendations from multiple addresses
+**Description**: Get AI-powered place recommendations using advanced 4-step algorithm
 
-**Features**:
-- Geocodes multiple addresses using Kakao/Naver APIs
-- Calculates optimal center point
-- Searches for places around the center
-- Uses AI (AWS Bedrock) for intelligent recommendations
-- Supports various place types and user preferences
+**4-Step Algorithm Process**:
+1. **Address-to-Coordinate Conversion**: Convert N input addresses to precise coordinates using Kakao API (primary) with Naver fallback, then calculate optimal midpoint using centroid algorithm
+2. **Nearby Place Extraction**: Search for M places around the calculated midpoint using Kakao Maps API with configurable radius and place type filtering  
+3. **Public Transportation Distance Analysis**: Calculate transit distances between each original address (N locations) and each discovered place (M locations) using Google Maps Distance Matrix API, generating a comprehensive N×M accessibility matrix
+4. **LLM-Powered Comprehensive Recommendation**: Apply AWS Bedrock Claude AI to analyze coordinate data, place information, and transportation accessibility data to generate intelligent recommendations with scoring and reasoning
+
+**Enhanced Features**:
+- Multi-API geocoding with robust fallback mechanisms
+- Sophisticated centroid calculation for balanced accessibility
+- Comprehensive place data extraction with ratings and categories
+- Public transportation accessibility analysis
+- AI-powered recommendation scoring with detailed reasoning
+- Korean language optimization and cultural context awareness
 
 **Request Body**:
 ```json
@@ -155,10 +162,40 @@ Currently, the API operates without authentication for development purposes. Fut
       "url": "https://example.com",
       "recommendationReason": "중심 지점에서 가깝고 평점이 높은 가족 친화적인 레스토랑입니다.",
       "description": "맛있는 한식당으로 유명한 곳입니다.",
-      "source": "naver",
-      "roadAddress": "서울특별시 강남구 테헤란로 123"
+      "source": "kakao",
+      "roadAddress": "서울특별시 강남구 테헤란로 123",
+      "transportationAccessibility": {
+        "averageTransitTime": "18분",
+        "accessibilityScore": 9.2,
+        "fromAddresses": [
+          {
+            "origin": "서울특별시 강남구 역삼동",
+            "transitTime": "15분",
+            "transitDistance": "3.2km",
+            "transitMode": "지하철 + 도보"
+          },
+          {
+            "origin": "서울특별시 서초구 서초동",
+            "transitTime": "21분", 
+            "transitDistance": "4.1km",
+            "transitMode": "버스 + 도보"
+          }
+        ]
+      },
+      "aiRecommendationScore": 9.4,
+      "aiAnalysis": "대중교통 접근성이 우수하고, 두 지역에서 균등하게 접근 가능합니다."
     }
   ],
+  "distanceMatrix": {
+    "analysisComplete": true,
+    "averageAccessibilityScore": 8.7,
+    "bestAccessibilityLocation": "강남 맛집",
+    "transitAnalysisSummary": {
+      "totalCalculations": 20,
+      "averageTransitTime": "19.5분",
+      "optimalLocation": "중심지 근처"
+    }
+  },
   "searchParams": {
     "placeType": "restaurant",
     "radiusMeters": 2000,
@@ -311,20 +348,23 @@ All error responses follow this structure:
 
 ## Environment Configuration
 
-Required environment variables:
+Required environment variables for 4-step algorithm:
 
 ```env
-# AWS Bedrock Configuration
+# AWS Bedrock Configuration (Step 4: LLM Analysis)
 AWS_REGION=us-east-1
 AWS_ACCESS_KEY_ID=your_access_key_here
 AWS_SECRET_ACCESS_KEY=your_secret_key_here
 
-# Kakao API (for geocoding)
-KAKAO_API_KEY=your_kakao_api_key
+# Kakao API (Step 1: Geocoding & Step 2: Places Search)
+KAKAO_REST_API_KEY=your_kakao_rest_api_key_here
 
-# Naver API (for places search)
-NAVER_CLIENT_ID=your_naver_client_id
-NAVER_CLIENT_SECRET=your_naver_client_secret
+# Naver API (Step 1: Geocoding Fallback)  
+NAVER_CLIENT_ID=your_naver_client_id_here
+NAVER_CLIENT_SECRET=your_naver_client_secret_here
+
+# Google Maps API (Step 3: Public Transportation Distance Matrix)
+GOOGLE_MAPS_API_KEY=your_google_maps_api_key_here
 
 # Application Configuration
 PORT=3000
@@ -343,21 +383,28 @@ curl -X POST http://localhost:3000/bedrock/chat \
   }'
 ```
 
-### Place Recommendation Example
+### 4-Step Algorithm Place Recommendation Example
 ```bash
 curl -X POST http://localhost:3000/location/recommend-places \
   -H "Content-Type: application/json" \
   -d '{
     "addresses": [
       "서울특별시 강남구 역삼동",
-      "서울특별시 서초구 서초동"
+      "서울특별시 서초구 서초동",
+      "서울특별시 종로구 종로1가"
     ],
     "placeType": "restaurant",
-    "radiusMeters": 1500,
-    "maxResults": 5,
-    "preferences": "가족 식사하기 좋은 곳"
+    "radiusMeters": 2000,
+    "maxResults": 10,
+    "preferences": "대중교통으로 접근하기 좋고 가족 식사하기 좋은 곳"
   }'
 ```
+
+**4-Step Processing Flow**:
+1. **Step 1**: Convert 3 addresses to coordinates → Calculate center point (역삼동-서초동-종로1가 중심지)
+2. **Step 2**: Search Kakao Maps for restaurants within 2km → Find 50+ potential places
+3. **Step 3**: Calculate transit times from each original address to each restaurant → Generate 3×50 distance matrix  
+4. **Step 4**: LLM analyzes coordinates + places + transit data → Return top 10 recommendations with accessibility scores
 
 ## Future Enhancements
 

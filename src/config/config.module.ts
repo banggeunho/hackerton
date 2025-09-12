@@ -13,6 +13,7 @@ import { validationSchema } from './validation';
         allowUnknown: true,
         abortEarly: false,
       },
+      envFilePath: ['.env.local', '.env'],
     }),
   ],
   exports: [NestConfigModule],

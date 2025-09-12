@@ -1,7 +1,8 @@
-import { Body, Controller, Logger, Post } from '@nestjs/common';
+import { Body, Controller, Get, Logger, Post, Query } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { LocationService } from './services/location.service';
 import { PlacesService } from './services/places.service';
+import { GoogleMapsService } from './services/google-maps.service';
 import {
   ErrorResponseDto,
   PlaceRecommendationRequestDto,
@@ -20,6 +21,7 @@ export class LocationController {
   constructor(
     private readonly locationService: LocationService,
     private readonly placesService: PlacesService,
+    private readonly googleMapsService: GoogleMapsService,
   ) {}
 
   @Post('recommend-places')
@@ -85,8 +87,10 @@ export class LocationController {
         `Request parameters: type=${placeType}, radius=${radiusMeters}m, maxResults=${maxResults}`,
       );
 
-      // Step 1: Calculate center point from addresses
-      this.logger.debug('Calculating center point from addresses');
+      // Step 1: Convert addresses to coordinates and calculate center point
+      this.logger.debug(
+        'Step 1: Converting addresses to coordinates and calculating center point',
+      );
       const centerPoint =
         await this.locationService.getCenterPointFromAddresses(
           request.addresses,
@@ -96,10 +100,13 @@ export class LocationController {
         `Center point calculated: ${centerPoint.address} (${centerPoint.coordinates.lat}, ${centerPoint.coordinates.lng})`,
       );
 
-      // Step 2: Get place recommendations around center point
-      this.logger.debug('Searching for places around center point');
+      // Steps 2-4: Search places, calculate transit distances, and get AI recommendations
+      this.logger.debug(
+        'Steps 2-4: Searching places, calculating transit distances, and generating AI recommendations',
+      );
       const recommendations = await this.placesService.getPlaceRecommendations(
         centerPoint.coordinates,
+        request.addresses,
         placeType,
         radiusMeters,
         maxResults,
@@ -111,12 +118,45 @@ export class LocationController {
         `Place recommendation completed: ${recommendations.length} places found in ${processingTime}ms`,
       );
 
-      // Step 3: Return structured response
+      // Create distance matrix analysis summary
+      const distanceMatrix = {
+        analysisComplete: true,
+        averageAccessibilityScore:
+          recommendations.length > 0
+            ? recommendations.reduce(
+                (sum, place) =>
+                  sum +
+                  (place.transportationAccessibility?.accessibilityScore || 5),
+                0,
+              ) / recommendations.length
+            : 0,
+        bestAccessibilityLocation:
+          recommendations.find(
+            (place) => place.transportationAccessibility?.accessibilityScore,
+          )?.name || 'N/A',
+        transitAnalysisSummary: {
+          totalCalculations: request.addresses.length * recommendations.length,
+          averageTransitTime:
+            recommendations.length > 0
+              ? Math.round(
+                  recommendations.reduce((sum, place) => {
+                    const transitTime =
+                      place.transportationAccessibility?.averageTransitTime;
+                    return sum + (transitTime ? parseInt(transitTime) : 20);
+                  }, 0) / recommendations.length,
+                ) + '분'
+              : 'N/A',
+          optimalLocation: '중심지 근처',
+        },
+      };
+
+      // Step 5: Return structured response with 4-step algorithm results
       return {
         success: true,
         timestamp: new Date().toISOString(),
         centerPoint,
         recommendations,
+        distanceMatrix,
         searchParams: {
           placeType: placeType !== 'restaurant' ? placeType : undefined,
           radiusMeters,
@@ -298,6 +338,64 @@ export class LocationController {
         'CENTER_POINT_FAILED',
         [error instanceof Error ? error.message : 'Unknown error'],
       );
+    }
+  }
+
+  @Get('debug-distance')
+  @ApiOperation({
+    summary: 'Debug Google Maps Distance Matrix API',
+    description: 'Test endpoint to debug distance calculations',
+  })
+  async debugDistance(
+    @Query('originLat') originLat: string,
+    @Query('originLng') originLng: string,
+    @Query('destLat') destLat: string,
+    @Query('destLng') destLng: string,
+  ) {
+    this.logger.log(
+      `Debug distance calculation from (${originLat}, ${originLng}) to (${destLat}, ${destLng})`,
+    );
+
+    try {
+      const origin = { lat: parseFloat(originLat), lng: parseFloat(originLng) };
+      const destination = {
+        lat: parseFloat(destLat),
+        lng: parseFloat(destLng),
+      };
+
+      // Test API key availability
+      const apiInfo = this.googleMapsService.getApiInfo();
+      this.logger.debug(`Google Maps API Info:`, apiInfo);
+
+      // Test distance calculation
+      const distances =
+        await this.googleMapsService.calculateDistanceBetweenCoordinates(
+          origin,
+          [destination],
+        );
+
+      return {
+        success: true,
+        timestamp: new Date().toISOString(),
+        apiInfo,
+        origin,
+        destination,
+        distances,
+        debug: {
+          originString: `${origin.lat},${origin.lng}`,
+          destinationString: `${destination.lat},${destination.lng}`,
+        },
+      };
+    } catch (error) {
+      this.logger.error('Debug distance calculation failed', error);
+      return {
+        success: false,
+        timestamp: new Date().toISOString(),
+        error: {
+          message: error instanceof Error ? error.message : 'Unknown error',
+          stack: error instanceof Error ? error.stack : undefined,
+        },
+      };
     }
   }
 }

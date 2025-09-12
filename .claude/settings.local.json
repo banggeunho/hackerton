@@ -23,7 +23,15 @@
       "Bash(cat:*)",
       "mcp__serena__search_for_pattern",
       "WebFetch(domain:developers.naver.com)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(npm run start:dev:*)",
+      "Bash(lsof:*)",
+      "Bash(xargs kill:*)",
+      "Bash(curl:*)",
+      "Bash(chmod:*)",
+      "Bash(npm run dev:*)",
+      "WebSearch",
+      "Bash(npm run lint:*)"
     ],
     "deny": [],
     "ask": []

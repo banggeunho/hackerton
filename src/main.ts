@@ -64,12 +64,65 @@ async function bootstrap() {
   SwaggerModule.setup('api', app, document);
 
   const port = appConfig.port;
-  await app.listen(port);
 
-  console.log(`Application is running on: http://localhost:${port}`);
-  console.log(
-    `Swagger documentation is available at: http://localhost:${port}/api`,
-  );
+  // Graceful shutdown handling for hot-reload
+  process.on('SIGTERM', async () => {
+    console.log('SIGTERM received, closing application...');
+    await app.close();
+  });
+
+  process.on('SIGINT', async () => {
+    console.log('SIGINT received, closing application...');
+    await app.close();
+  });
+
+  try {
+    await app.listen(port);
+    console.log(`Application is running on: http://localhost:${port}`);
+    console.log(
+      `Swagger documentation is available at: http://localhost:${port}/api`,
+    );
+  } catch (error) {
+    if (error.code === 'EADDRINUSE') {
+      console.error(
+        `Port ${port} is already in use. Trying to gracefully restart...`,
+      );
+      // Force kill existing process and retry
+      const { spawn } = require('child_process');
+      spawn('lsof', ['-ti', `:${port}`], { stdio: 'pipe' }).stdout.on(
+        'data',
+        (pid) => {
+          const processes = pid.toString().trim().split('\n');
+          processes.forEach((p) => {
+            if (p && p !== process.pid.toString()) {
+              try {
+                process.kill(parseInt(p), 'SIGKILL');
+                console.log(`Killed process ${p} using port ${port}`);
+              } catch (killError) {
+                console.warn(`Could not kill process ${p}:`, killError.message);
+              }
+            }
+          });
+
+          // Retry after cleanup
+          setTimeout(async () => {
+            try {
+              await app.listen(port);
+              console.log(
+                `Application restarted successfully on: http://localhost:${port}`,
+              );
+            } catch (retryError) {
+              console.error('Failed to restart:', retryError);
+              process.exit(1);
+            }
+          }, 1000);
+        },
+      );
+    } else {
+      console.error('Failed to start application:', error);
+      process.exit(1);
+    }
+  }
 }
 
 void bootstrap();

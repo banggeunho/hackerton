@@ -208,6 +208,151 @@ export class PlaceDto {
     example: '서울특별시 강남구 테헤란로 123',
   })
   roadAddress?: string;
+
+  @ApiPropertyOptional({
+    description: 'Google Maps distance information with driving time',
+    type: 'object',
+    properties: {
+      meters: { type: 'number', example: 1250 },
+      text: { type: 'string', example: '1.3 km' },
+      durationSeconds: { type: 'number', example: 180 },
+      durationText: { type: 'string', example: '3분' },
+    },
+  })
+  googleMapsDistance?: {
+    meters: number;
+    text: string;
+    durationSeconds: number;
+    durationText: string;
+  };
+
+  @ApiPropertyOptional({
+    description: 'Public transportation accessibility data from Step 3',
+    type: 'object',
+    properties: {
+      averageTransitTime: { type: 'string', example: '18분' },
+      accessibilityScore: { type: 'number', example: 9.2 },
+      fromAddresses: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            origin: { type: 'string', example: '서울특별시 강남구 역삼동' },
+            transitTime: { type: 'string', example: '15분' },
+            transitDistance: { type: 'string', example: '3.2km' },
+            transitMode: { type: 'string', example: '지하철 + 도보' },
+          },
+        },
+      },
+    },
+  })
+  transportationAccessibility?: {
+    averageTransitTime: string;
+    accessibilityScore: number;
+    fromAddresses: Array<{
+      origin: string;
+      transitTime: string;
+      transitDistance: string;
+      transitMode: string;
+    }>;
+  };
+
+  @ApiPropertyOptional({
+    description: 'AI recommendation score from Step 4 (1-10)',
+    example: 9.4,
+    minimum: 1,
+    maximum: 10,
+  })
+  aiRecommendationScore?: number;
+
+  @ApiPropertyOptional({
+    description: 'AI analysis and recommendation reasoning from Step 4',
+    example:
+      '대중교통 접근성이 우수하고, 두 지역에서 균등하게 접근 가능합니다.',
+  })
+  aiAnalysis?: string;
+
+  // Enhanced Google Places API data fields
+  @ApiPropertyOptional({
+    description: 'Google Place ID for detailed information',
+    example: 'ChIJN1t_tDeuEmsRUsoyG83frY4',
+  })
+  googlePlaceId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Business status from Google Places',
+    example: 'OPERATIONAL',
+  })
+  businessStatus?: string;
+
+  @ApiPropertyOptional({
+    description: 'Price level (0-4) from Google Places',
+    example: 2,
+    minimum: 0,
+    maximum: 4,
+  })
+  priceLevel?: number;
+
+  @ApiPropertyOptional({
+    description: 'Total number of user ratings',
+    example: 1250,
+  })
+  userRatingsTotal?: number;
+
+  @ApiPropertyOptional({
+    description: 'Opening hours information',
+    type: 'object',
+    properties: {
+      openNow: { type: 'boolean', example: true },
+      weekdayText: {
+        type: 'array',
+        items: { type: 'string' },
+        example: ['월요일: 09:00~21:00', '화요일: 09:00~21:00'],
+      },
+    },
+  })
+  openingHours?: {
+    openNow: boolean;
+    weekdayText?: string[];
+  };
+
+  @ApiPropertyOptional({
+    description: 'Place photos from Google Places',
+    type: 'array',
+    items: {
+      type: 'object',
+      properties: {
+        photoReference: { type: 'string' },
+        height: { type: 'number' },
+        width: { type: 'number' },
+      },
+    },
+  })
+  photos?: Array<{
+    photoReference: string;
+    height: number;
+    width: number;
+  }>;
+
+  @ApiPropertyOptional({
+    description: 'Recent reviews from Google Places (up to 5)',
+    type: 'array',
+    items: {
+      type: 'object',
+      properties: {
+        authorName: { type: 'string', example: '김철수' },
+        rating: { type: 'number', example: 5 },
+        text: { type: 'string', example: '음식이 정말 맛있어요!' },
+        time: { type: 'number', example: 1640995200 },
+      },
+    },
+  })
+  reviews?: Array<{
+    authorName: string;
+    rating: number;
+    text: string;
+    time: number;
+  }>;
 }
 
 /**
@@ -260,6 +405,34 @@ export class PlaceRecommendationResponseDto extends BaseResponseDto {
     radiusMeters: number;
     maxResults: number;
     preferences?: string;
+  };
+
+  @ApiPropertyOptional({
+    description: 'Distance matrix analysis summary from Step 3',
+    type: 'object',
+    properties: {
+      analysisComplete: { type: 'boolean', example: true },
+      averageAccessibilityScore: { type: 'number', example: 8.7 },
+      bestAccessibilityLocation: { type: 'string', example: '강남 맛집' },
+      transitAnalysisSummary: {
+        type: 'object',
+        properties: {
+          totalCalculations: { type: 'number', example: 20 },
+          averageTransitTime: { type: 'string', example: '19.5분' },
+          optimalLocation: { type: 'string', example: '중심지 근처' },
+        },
+      },
+    },
+  })
+  distanceMatrix?: {
+    analysisComplete: boolean;
+    averageAccessibilityScore: number;
+    bestAccessibilityLocation: string;
+    transitAnalysisSummary: {
+      totalCalculations: number;
+      averageTransitTime: string;
+      optimalLocation: string;
+    };
   };
 
   @ApiProperty({

@@ -3,6 +3,19 @@
   "collection": "@nestjs/schematics",
   "sourceRoot": "src",
   "compilerOptions": {
-    "deleteOutDir": true
+    "deleteOutDir": true,
+    "tsConfigPath": "tsconfig.build.json",
+    "watchAssets": true
+  },
+  "projects": {},
+  "monorepo": false,
+  "root": "src",
+  "entryFile": "main",
+  "exec": "node",
+  "watchMode": {
+    "watchAssets": true,
+    "assetsExtensions": [".ts", ".js", ".json"],
+    "debounceMs": 500,
+    "preserveWatchOutput": true
   }
 }

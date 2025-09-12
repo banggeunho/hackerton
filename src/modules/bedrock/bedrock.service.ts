@@ -18,7 +18,7 @@ export class BedrockService {
     this.chatModel = new ChatBedrockConverse({
       model: 'apac.anthropic.claude-3-haiku-20240307-v1:0',
       region: awsConfig.region,
-      maxTokens: 1000,
+      maxTokens: 4096,
       temperature: 0.7,
     });
   }

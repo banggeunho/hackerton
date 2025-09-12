@@ -18,11 +18,16 @@ export interface NaverConfig {
   clientSecret?: string;
 }
 
+export interface GoogleConfig {
+  mapsApiKey?: string;
+}
+
 export interface AllConfigType {
   app: AppConfig;
   aws: AwsConfig;
   kakao: KakaoConfig;
   naver: NaverConfig;
+  google: GoogleConfig;
 }
 
 export default (): AllConfigType => ({
@@ -41,5 +46,8 @@ export default (): AllConfigType => ({
   naver: {
     clientId: process.env.NAVER_CLIENT_ID,
     clientSecret: process.env.NAVER_CLIENT_SECRET,
+  },
+  google: {
+    mapsApiKey: process.env.GOOGLE_MAPS_API_KEY,
   },
 });

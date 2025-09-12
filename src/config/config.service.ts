@@ -57,14 +57,14 @@ export class AppConfigService {
   private validateEnvironment(): void {
     const requiredVars = [
       'KAKAO_REST_API_KEY',
-      'NAVER_CLIENT_ID', 
-      'NAVER_CLIENT_SECRET'
+      'NAVER_CLIENT_ID',
+      'NAVER_CLIENT_SECRET',
     ];
 
     const optionalVars = [
       'AWS_REGION',
       'AWS_ACCESS_KEY_ID',
-      'AWS_SECRET_ACCESS_KEY'
+      'AWS_SECRET_ACCESS_KEY',
     ];
 
     this.logger.log('Environment Variable Status:');
@@ -103,10 +103,10 @@ export class AppConfigService {
     // Warn about missing required variables
     if (missingRequired.length > 0) {
       this.logger.error(
-        `Missing required environment variables: ${missingRequired.join(', ')}`
+        `Missing required environment variables: ${missingRequired.join(', ')}`,
       );
       this.logger.error(
-        'Please check your .env file and ensure all required variables are set.'
+        'Please check your .env.local file and ensure all required variables are set.',
       );
     }
 
@@ -144,6 +144,10 @@ export class AppConfigService {
   private maskSensitiveValue(value: string): string {
     if (!value) return 'undefined';
     if (value.length <= 8) return '*'.repeat(value.length);
-    return value.substring(0, 4) + '*'.repeat(value.length - 8) + value.substring(value.length - 4);
+    return (
+      value.substring(0, 4) +
+      '*'.repeat(value.length - 8) +
+      value.substring(value.length - 4)
+    );
   }
 }
