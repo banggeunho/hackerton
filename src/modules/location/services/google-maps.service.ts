@@ -2,18 +2,17 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   Client,
-  DistanceMatrixRequest,
-  DistanceMatrixResponse,
   PlaceDetailsRequest,
   PlaceDetailsResponse,
   PlacesNearbyRequest,
   PlacesNearbyResponse,
-  TravelMode,
-  UnitSystem,
 } from '@googlemaps/google-maps-services-js';
 import { AllConfigType } from '../../../config';
 import { CoordinateDto, PlaceDto } from '../../../common/dto';
 import { ExternalServiceException } from '../../../common/exceptions';
+import { RoutesClient } from '@googlemaps/routing';
+import { AddressValidationClient } from '@googlemaps/addressvalidation';
+import { PlacesClient } from '@googlemaps/places';
 
 /**
  * Interface for distance calculation result
@@ -82,6 +81,9 @@ export interface GooglePlaceData {
 export class GoogleMapsService {
   private readonly logger = new Logger(GoogleMapsService.name);
   private readonly googleMapsClient: Client;
+  private readonly routingClient: RoutesClient;
+  private readonly addressValidationClient: AddressValidationClient;
+  private readonly placesClient: PlacesClient;
   private readonly apiKey: string;
 
   constructor(private configService: ConfigService<AllConfigType>) {
@@ -97,6 +99,11 @@ export class GoogleMapsService {
     }
 
     this.googleMapsClient = new Client({});
+    this.routingClient = new RoutesClient({
+      apiKey: this.apiKey,
+    });
+    this.addressValidationClient = new AddressValidationClient({});
+    this.placesClient = new PlacesClient({});
   }
 
   /**
@@ -120,62 +127,98 @@ export class GoogleMapsService {
 
     try {
       this.logger.debug(
-        `Calculating distances from coordinates (${origin.lat} ${origin.lng}) to ${destinations.length} destinations`,
+        `Calculating distances from coordinates (${origin.lat} ${origin.lng}) to ${destinations.length} destinations (using Routing API)`,
       );
 
-      const request: DistanceMatrixRequest = {
-        params: {
-          origins: [origin],
-          destinations: destinations,
-          key: this.apiKey,
-          units: UnitSystem.metric,
-          mode: TravelMode.driving,
-          language: 'ko' as any,
+      // Routing API의 요청 형식에 맞게 변환
+      const request = {
+        origins: [
+          {
+            waypoint: {
+              location: {
+                latLng: {
+                  latitude: origin.lat,
+                  longitude: origin.lng,
+                },
+              },
+            },
+            routeModifiers: {},
+          },
+        ],
+        destinations: destinations.map((d) => ({
+          waypoint: {
+            location: {
+              latLng: {
+                latitude: d.lat,
+                longitude: d.lng,
+              },
+            },
+          },
+        })),
+        travelMode: 'TRANSIT',
+        routingPreference: 'TRAFFIC_AWARE',
+        languageCode: 'ko',
+        units: 'METRIC',
+      };
+
+      const options = {
+        otherArgs: {
+          headers: {
+            'X-Goog-FieldMask':
+              'duration,distanceMeters,status,condition,originIndex,destinationIndex',
+          },
         },
       };
 
       this.logger.debug(
-        'Distance Matrix API request:',
+        'Routing API computeRouteMatrix request:',
         JSON.stringify(request, null, 2),
       );
 
-      const response: DistanceMatrixResponse =
-        await this.googleMapsClient.distancematrix(request);
-
-      this.logger.debug(
-        'Distance Matrix API response status:',
-        response.data.status,
-      );
-      this.logger.debug(
-        'Distance Matrix API response data:',
-        JSON.stringify(response.data, null, 2),
-      );
-
-      if (response.data.status !== 'OK') {
-        this.logger.error(
-          `Distance Matrix API error: ${response.data.status}`,
-          response.data,
-        );
-        throw new Error(`Distance Matrix API error: ${response.data.status}`);
+      // computeRouteMatrix는 비동기 이터러블을 반환함
+      const matrixResults: DistanceResult[] = [];
+      let destIdx = 0;
+      for await (const result of this.routingClient.computeRouteMatrix(
+        request as any,
+        options,
+      )) {
+        if (result.status === 'OK') {
+          matrixResults.push({
+            originAddress: `${origin.lat},${origin.lng}`,
+            destinationAddress: `${destinations[destIdx].lat},${destinations[destIdx].lng}`,
+            distanceMeters: result.distanceMeters ?? 0,
+            distanceText: result.distanceMeters
+              ? `${(result.distanceMeters / 1000).toFixed(1)} km`
+              : 'N/A',
+            durationSeconds: result.duration?.seconds ?? 0,
+            durationText: result.duration
+              ? `${Math.floor(result.duration.seconds / 60)}분`
+              : 'N/A',
+          });
+        } else {
+          this.logger.warn(
+            `Routing API distance calculation failed for ${origin.lat},${origin.lng} -> ${destinations[destIdx].lat},${destinations[destIdx].lng}: ${result.status}`,
+          );
+          matrixResults.push({
+            originAddress: `${origin.lat},${origin.lng}`,
+            destinationAddress: `${destinations[destIdx].lat},${destinations[destIdx].lng}`,
+            distanceMeters: 0,
+            distanceText: 'N/A',
+            durationSeconds: 0,
+            durationText: 'N/A',
+          });
+        }
+        destIdx++;
       }
 
-      // Parse response and return distance results
-      // For Distance Matrix: origins are rows, destinations are columns
-      const parsedResponse = this.parseDistanceMatrixResponse(
-        response.data,
-        [origin.lat + ',' + origin.lng],
-        destinations.map((d) => d.lat + ',' + d.lng),
-      );
-
-      // Return the first row (origin to all destinations)
-      return parsedResponse[0] || [];
+      return matrixResults;
     } catch (error) {
       this.logger.error(
-        'Google Maps coordinate distance calculation failed',
+        'Google Maps Routing API coordinate distance calculation failed',
         error,
       );
       throw new ExternalServiceException(
-        'Google Maps API',
+        'Google Maps Routing API',
         error instanceof Error
           ? error.message
           : 'Coordinate distance calculation failed',
@@ -259,6 +302,8 @@ export class GoogleMapsService {
 
       const response: PlacesNearbyResponse =
         await this.googleMapsClient.placesNearby(request);
+
+      this.routingClient.computeRouteMatrix();
 
       this.logger.debug(
         `Google Places API found ${response.data.results.length} places`,

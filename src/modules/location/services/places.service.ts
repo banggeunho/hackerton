@@ -611,7 +611,7 @@ ${placesContext}
     }
 
     // Step 3: Calculate public transportation distances (N×M matrix)
-    const placesWithTransitData = this.calculateTransitDistances(
+    const placesWithTransitData = await this.calculateTransitDistances(
       originalAddresses,
       places,
     );
@@ -635,10 +635,10 @@ ${placesContext}
   /**
    * Step 3: Calculate public transportation distances (N×M matrix)
    */
-  calculateTransitDistances(
+  async calculateTransitDistances(
     originalAddresses: string[],
     places: PlaceDto[],
-  ): PlaceDto[] {
+  ): Promise<PlaceDto[]> {
     this.logger.debug(
       `Step 3: Calculating transit distances for ${originalAddresses.length} addresses × ${places.length} places`,
     );
@@ -659,17 +659,19 @@ ${placesContext}
       });
 
       // Calculate transit distances for each place
-      const enhancedPlaces = places.map((place) => {
-        const transitData = this.calculateTransitToPlace(
-          originCoordinates,
-          originalAddresses,
-          place,
-        );
-        return {
-          ...place,
-          transportationAccessibility: transitData,
-        };
-      });
+      const enhancedPlaces = await Promise.all(
+        places.map(async (place) => {
+          const transitData = await this.calculateTransitToPlace(
+            originCoordinates,
+            originalAddresses,
+            place,
+          );
+          return {
+            ...place,
+            transportationAccessibility: transitData,
+          };
+        }),
+      );
 
       return enhancedPlaces;
     } catch (error) {
@@ -684,22 +686,33 @@ ${placesContext}
   /**
    * Calculate transit information for a single place
    */
-  private calculateTransitToPlace(
+  private async calculateTransitToPlace(
     origins: CoordinateDto[],
     originalAddresses: string[],
     place: PlaceDto,
-  ): any {
+  ): Promise<any> {
     try {
+      console.log(
+        await this.googleMapsService.calculateDistanceBetweenCoordinates(
+          place.coordinates,
+          origins,
+        ),
+      );
+
       // Simplified transit calculation
-      const transitTimes = origins.map((origin, index) => ({
-        origin: originalAddresses[index],
-        transitTime: Math.round(15 + Math.random() * 20) + '분', // Simplified mock
-        transitDistance:
-          Math.round(this.calculateDistance(origin, place.coordinates) / 100) /
-            10 +
-          'km',
-        transitMode: '지하철 + 도보',
-      }));
+      const transitTimes = origins.map((origin, index) => {
+        return {
+          origin: originalAddresses[index],
+          transitTime: Math.round(15 + Math.random() * 20) + '분', // Simplified mock
+          transitDistance:
+            Math.round(
+              this.calculateDistance(origin, place.coordinates) / 100,
+            ) /
+              10 +
+            'km',
+          transitMode: '지하철 + 도보',
+        };
+      });
 
       const averageTime = Math.round(
         transitTimes.reduce((sum, t) => sum + parseInt(t.transitTime), 0) /
