@@ -16,9 +16,9 @@ export class BedrockService {
     const awsConfig = this.configService.get('aws', { infer: true })!;
 
     this.chatModel = new ChatBedrockConverse({
-      model: 'apac.anthropic.claude-3-haiku-20240307-v1:0',
+      model: 'apac.anthropic.claude-3-7-sonnet-20250219-v1:0',
       region: awsConfig.region,
-      maxTokens: 4096,
+      maxTokens: 10000,
       temperature: 0.7,
     });
   }

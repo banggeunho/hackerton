@@ -6,6 +6,10 @@ import {
   PlaceDetailsResponse,
   PlacesNearbyRequest,
   PlacesNearbyResponse,
+  TransitMode,
+  TransitRoutingPreference,
+  TravelMode,
+  UnitSystem,
 } from '@googlemaps/google-maps-services-js';
 import { AllConfigType } from '../../../config';
 import { CoordinateDto, PlaceDto } from '../../../common/dto';
@@ -48,22 +52,11 @@ export interface GooglePlaceData {
     photoReference: string;
     height: number;
     width: number;
+    url: string;
   }>;
-  geometry?: {
-    viewport?: {
-      northeast: CoordinateDto;
-      southwest: CoordinateDto;
-    };
-  };
   // Enhanced details from Place Details API
   phoneNumber?: string;
   website?: string;
-  reviews?: Array<{
-    authorName: string;
-    rating: number;
-    text: string;
-    time: number;
-  }>;
   popularTimes?: Array<{
     dayOfWeek: number;
     hours: Array<{
@@ -107,6 +100,125 @@ export class GoogleMapsService {
   }
 
   /**
+   * Calculate transit time and distance between coordinates using Google Maps Distance Matrix API
+   * This method specifically focuses on public transportation (TRANSIT mode)
+   */
+  async calculateTransitTime(
+    origin: CoordinateDto,
+    destinations: CoordinateDto[],
+  ): Promise<DistanceResult[]> {
+    if (!this.apiKey) {
+      throw new ExternalServiceException(
+        'Google Maps API',
+        'API key not configured',
+      );
+    }
+
+    if (destinations.length === 0) {
+      return [];
+    }
+
+    try {
+      this.logger.debug(
+        `Calculating transit times from (${origin.lat}, ${origin.lng}) to ${destinations.length} destinations using official library`,
+      );
+
+      // Convert destinations to lat,lng string format for Distance Matrix API
+      const destinationStrings = destinations.map(
+        (dest) => `${dest.lat},${dest.lng}`,
+      );
+
+      // Use official @googlemaps/google-maps-services-js library
+      const response = await this.googleMapsClient.distancematrix({
+        params: {
+          origins: [`${origin.lat},${origin.lng}`],
+          destinations: destinationStrings,
+          mode: TravelMode.transit, // Public transportation
+          units: UnitSystem.metric,
+          language: 'ko',
+          departure_time: Math.floor(Date.now() / 1000), // Use current timestamp
+          transit_mode: [
+            TransitMode.bus,
+            TransitMode.subway,
+            TransitMode.train,
+          ],
+          transit_routing_preference: TransitRoutingPreference.fewer_transfers,
+          key: this.apiKey,
+        },
+        timeout: 10000, // 10 second timeout
+      });
+
+      this.logger.debug(
+        'Distance Matrix API response:',
+        JSON.stringify(response.data, null, 2),
+      );
+
+      const matrixResults: DistanceResult[] = [];
+
+      if (response.data.status === 'OK' && response.data.rows.length > 0) {
+        const elements = response.data.rows[0].elements;
+
+        elements.forEach((element: any, index: number) => {
+          if (element.status === 'OK') {
+            const durationSeconds = element.duration?.value || 0;
+            const durationMinutes = Math.floor(durationSeconds / 60);
+
+            matrixResults.push({
+              originAddress: `${origin.lat},${origin.lng}`,
+              destinationAddress: destinationStrings[index],
+              distanceMeters: element.distance?.value || 0,
+              distanceText: element.distance?.text || 'N/A',
+              durationSeconds,
+              durationText:
+                durationMinutes > 0
+                  ? `${durationMinutes}분`
+                  : element.duration?.text || 'N/A',
+            });
+          } else {
+            this.logger.warn(
+              `Transit calculation failed for destination ${index}: ${element.status}`,
+            );
+            matrixResults.push({
+              originAddress: `${origin.lat},${origin.lng}`,
+              destinationAddress: destinationStrings[index],
+              distanceMeters: 0,
+              distanceText: 'N/A',
+              durationSeconds: 0,
+              durationText: 'N/A',
+            });
+          }
+        });
+      } else {
+        this.logger.warn(
+          `Distance Matrix API failed with status: ${response.data.status}`,
+        );
+      }
+
+      this.logger.debug(
+        `Transit time calculation completed for ${matrixResults.length} destinations`,
+      );
+      return matrixResults;
+    } catch (error) {
+      this.logger.error('Google Maps transit time calculation failed', error);
+
+      // Return fallback results instead of throwing to prevent server crash
+      const fallbackResults: DistanceResult[] = destinations.map((dest) => ({
+        originAddress: `${origin.lat},${origin.lng}`,
+        destinationAddress: `${dest.lat},${dest.lng}`,
+        distanceMeters: 0,
+        distanceText: 'N/A',
+        durationSeconds: 0,
+        durationText: 'N/A',
+      }));
+
+      this.logger.warn(
+        `Returning ${fallbackResults.length} fallback transit results due to API error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
+      return fallbackResults;
+    }
+  }
+
+  /**
    * Calculate distance between coordinates using Google Maps Distance Matrix API
    * This method uses coordinates instead of addresses for more accurate calculations
    */
@@ -127,102 +239,111 @@ export class GoogleMapsService {
 
     try {
       this.logger.debug(
-        `Calculating distances from coordinates (${origin.lat} ${origin.lng}) to ${destinations.length} destinations (using Routing API)`,
+        `Calculating driving distances from (${origin.lat}, ${origin.lng}) to ${destinations.length} destinations using Distance Matrix API`,
       );
 
-      // Routing API의 요청 형식에 맞게 변환
-      const request = {
-        origins: [
-          {
-            waypoint: {
-              location: {
-                latLng: {
-                  latitude: origin.lat,
-                  longitude: origin.lng,
-                },
-              },
-            },
-            routeModifiers: {},
-          },
-        ],
-        destinations: destinations.map((d) => ({
-          waypoint: {
-            location: {
-              latLng: {
-                latitude: d.lat,
-                longitude: d.lng,
-              },
-            },
-          },
-        })),
-        travelMode: 'TRANSIT',
-        routingPreference: 'TRAFFIC_AWARE',
-        languageCode: 'ko',
-        units: 'METRIC',
-      };
+      // Convert destinations to lat,lng string format for Distance Matrix API
+      const destinationStrings = destinations.map(
+        (dest) => `${dest.lat},${dest.lng}`,
+      );
 
-      const options = {
-        otherArgs: {
-          headers: {
-            'X-Goog-FieldMask':
-              'duration,distanceMeters,status,condition,originIndex,destinationIndex',
-          },
+      // Use Distance Matrix API instead of Routes API for better reliability
+      const response = await this.googleMapsClient.distancematrix({
+        params: {
+          origins: [`${origin.lat},${origin.lng}`],
+          destinations: destinationStrings,
+          mode: TravelMode.driving, // Use driving mode for general distance calculations
+          units: UnitSystem.metric,
+          language: 'ko',
+          avoid: [], // No restrictions
+          key: this.apiKey,
         },
-      };
+        timeout: 10000, // 10 second timeout
+      });
 
       this.logger.debug(
-        'Routing API computeRouteMatrix request:',
-        JSON.stringify(request, null, 2),
+        'Distance Matrix API (driving) response status:',
+        response.data.status,
       );
 
-      // computeRouteMatrix는 비동기 이터러블을 반환함
       const matrixResults: DistanceResult[] = [];
-      let destIdx = 0;
-      for await (const result of this.routingClient.computeRouteMatrix(
-        request as any,
-        options,
-      )) {
-        if (result.status === 'OK') {
+
+      if (response.data.status === 'OK' && response.data.rows.length > 0) {
+        const elements = response.data.rows[0].elements;
+
+        elements.forEach((element: any, index: number) => {
+          if (element.status === 'OK') {
+            const durationSeconds = element.duration?.value || 0;
+            const durationMinutes = Math.floor(durationSeconds / 60);
+
+            matrixResults.push({
+              originAddress: `${origin.lat},${origin.lng}`,
+              destinationAddress: destinationStrings[index],
+              distanceMeters: element.distance?.value || 0,
+              distanceText: element.distance?.text || 'N/A',
+              durationSeconds,
+              durationText:
+                durationMinutes > 0
+                  ? `${durationMinutes}분`
+                  : element.duration?.text || 'N/A',
+            });
+          } else {
+            this.logger.warn(
+              `Distance calculation failed for destination ${index}: ${element.status}`,
+            );
+            // Return fallback data instead of crashing
+            matrixResults.push({
+              originAddress: `${origin.lat},${origin.lng}`,
+              destinationAddress: destinationStrings[index],
+              distanceMeters: 0,
+              distanceText: 'N/A',
+              durationSeconds: 0,
+              durationText: 'N/A',
+            });
+          }
+        });
+      } else {
+        this.logger.warn(
+          `Distance Matrix API failed with status: ${response.data.status}`,
+        );
+
+        // Return fallback results for all destinations to prevent crashes
+        destinations.forEach((dest) => {
           matrixResults.push({
             originAddress: `${origin.lat},${origin.lng}`,
-            destinationAddress: `${destinations[destIdx].lat},${destinations[destIdx].lng}`,
-            distanceMeters: result.distanceMeters ?? 0,
-            distanceText: result.distanceMeters
-              ? `${(result.distanceMeters / 1000).toFixed(1)} km`
-              : 'N/A',
-            durationSeconds: result.duration?.seconds ?? 0,
-            durationText: result.duration
-              ? `${Math.floor(result.duration.seconds / 60)}분`
-              : 'N/A',
-          });
-        } else {
-          this.logger.warn(
-            `Routing API distance calculation failed for ${origin.lat},${origin.lng} -> ${destinations[destIdx].lat},${destinations[destIdx].lng}: ${result.status}`,
-          );
-          matrixResults.push({
-            originAddress: `${origin.lat},${origin.lng}`,
-            destinationAddress: `${destinations[destIdx].lat},${destinations[destIdx].lng}`,
+            destinationAddress: `${dest.lat},${dest.lng}`,
             distanceMeters: 0,
             distanceText: 'N/A',
             durationSeconds: 0,
             durationText: 'N/A',
           });
-        }
-        destIdx++;
+        });
       }
 
+      this.logger.debug(
+        `Distance calculation completed for ${matrixResults.length} destinations`,
+      );
       return matrixResults;
     } catch (error) {
       this.logger.error(
-        'Google Maps Routing API coordinate distance calculation failed',
+        'Google Maps Distance Matrix API coordinate distance calculation failed',
         error,
       );
-      throw new ExternalServiceException(
-        'Google Maps Routing API',
-        error instanceof Error
-          ? error.message
-          : 'Coordinate distance calculation failed',
+
+      // Return fallback results instead of throwing to prevent server crash
+      const fallbackResults: DistanceResult[] = destinations.map((dest) => ({
+        originAddress: `${origin.lat},${origin.lng}`,
+        destinationAddress: `${dest.lat},${dest.lng}`,
+        distanceMeters: 0,
+        distanceText: 'N/A',
+        durationSeconds: 0,
+        durationText: 'N/A',
+      }));
+
+      this.logger.warn(
+        `Returning ${fallbackResults.length} fallback distance results due to API error`,
       );
+      return fallbackResults;
     }
   }
 
@@ -303,8 +424,6 @@ export class GoogleMapsService {
       const response: PlacesNearbyResponse =
         await this.googleMapsClient.placesNearby(request);
 
-      this.routingClient.computeRouteMatrix();
-
       this.logger.debug(
         `Google Places API found ${response.data.results.length} places`,
       );
@@ -360,7 +479,6 @@ export class GoogleMapsService {
             'photos',
             'formatted_phone_number',
             'website',
-            'reviews',
           ],
           key: this.apiKey,
           language: 'ko' as any,
@@ -421,13 +539,13 @@ export class GoogleMapsService {
             openNow: googlePlace.opening_hours.open_now,
           }
         : undefined,
-      photos: googlePlace.photos
-        ? googlePlace.photos.map((photo: any) => ({
-            photoReference: photo.photo_reference,
-            height: photo.height,
-            width: photo.width,
-          }))
-        : undefined,
+      photos: this.processPhotos(
+        googlePlace.photos?.map((photo: any) => ({
+          photoReference: photo.photo_reference,
+          height: photo.height,
+          width: photo.width,
+        }))
+      ),
     };
   }
 
@@ -457,23 +575,15 @@ export class GoogleMapsService {
             weekdayText: googlePlace.opening_hours.weekday_text,
           }
         : undefined,
-      photos: googlePlace.photos
-        ? googlePlace.photos.slice(0, 3).map((photo: any) => ({
-            photoReference: photo.photo_reference,
-            height: photo.height,
-            width: photo.width,
-          }))
-        : undefined,
+      photos: this.processPhotos(
+        googlePlace.photos?.slice(0, 3).map((photo: any) => ({
+          photoReference: photo.photo_reference,
+          height: photo.height,
+          width: photo.width,
+        }))
+      ),
       phoneNumber: googlePlace.formatted_phone_number,
       website: googlePlace.website,
-      reviews: googlePlace.reviews
-        ? googlePlace.reviews.slice(0, 5).map((review: any) => ({
-            authorName: review.author_name,
-            rating: review.rating,
-            text: review.text,
-            time: review.time,
-          }))
-        : undefined,
     };
   }
 
@@ -528,7 +638,6 @@ export class GoogleMapsService {
       userRatingsTotal: googlePlace.userRatingsTotal,
       openingHours: googlePlace.openingHours,
       photos: googlePlace.photos,
-      reviews: googlePlace.reviews,
     };
   }
 
@@ -573,6 +682,39 @@ export class GoogleMapsService {
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
     return R * c;
+  }
+
+  /**
+   * Generate photo URL from Google Places photo reference
+   * @param photoReference - Photo reference from Google Places API
+   * @param maxWidth - Maximum width of the photo (default 400px)
+   * @returns Full photo URL or null if no API key
+   */
+  generatePhotoUrl(photoReference: string, maxWidth: number = 400): string | null {
+    if (!this.apiKey || !photoReference) {
+      return null;
+    }
+
+    return `https://maps.googleapis.com/maps/api/place/photo?maxwidth=${maxWidth}&photo_reference=${photoReference}&key=${this.apiKey}`;
+  }
+
+  /**
+   * Process photos array to include usable URLs
+   */
+  processPhotos(photos: Array<{ photoReference: string; height: number; width: number }> | undefined): Array<{
+    photoReference: string;
+    height: number;
+    width: number;
+    url: string;
+  }> | undefined {
+    if (!photos || photos.length === 0) {
+      return undefined;
+    }
+
+    return photos.map((photo) => ({
+      ...photo,
+      url: this.generatePhotoUrl(photo.photoReference, Math.min(photo.width, 800)) || '',
+    })).filter(photo => photo.url !== ''); // Filter out photos without valid URLs
   }
 
   /**

@@ -1,13 +1,13 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
-  IsString,
-  IsArray,
   ArrayNotEmpty,
-  IsOptional,
-  IsNumber,
-  Min,
-  Max,
+  IsArray,
   IsEnum,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { BaseResponseDto } from './base.dto';
@@ -47,11 +47,7 @@ export class CoordinateDto {
 export class PlaceRecommendationRequestDto {
   @ApiProperty({
     description: 'List of addresses to find center point from',
-    example: [
-      '서울특별시 강남구 역삼동',
-      '서울특별시 서초구 서초동',
-      '서울특별시 종로구 종로1가',
-    ],
+    example: ['고양시 덕양구 화정동', '수원시 장안구 율전동'],
     type: [String],
   })
   @IsArray({ message: 'Addresses must be an array' })
@@ -134,6 +130,21 @@ export class PlaceRecommendationRequestDto {
  * Place information DTO
  */
 export class PlaceDto {
+  @ApiPropertyOptional({
+    description: 'AI recommendation score from Step 4 (1-10)',
+    example: 9.4,
+    minimum: 1,
+    maximum: 10,
+  })
+  aiRecommendationScore?: number;
+
+  @ApiPropertyOptional({
+    description: 'AI analysis and recommendation reasoning from Step 4',
+    example:
+      '대중교통 접근성이 우수하고, 두 지역에서 균등하게 접근 가능합니다.',
+  })
+  aiAnalysis?: string;
+
   @ApiProperty({
     description: 'Place name',
     example: '강남 맛집',
@@ -249,28 +260,16 @@ export class PlaceDto {
   transportationAccessibility?: {
     averageTransitTime: string;
     accessibilityScore: number;
+    calculationMethod?: string;
     fromAddresses: Array<{
       origin: string;
       transitTime: string;
       transitDistance: string;
       transitMode: string;
+      durationSeconds?: number;
+      distanceMeters?: number;
     }>;
   };
-
-  @ApiPropertyOptional({
-    description: 'AI recommendation score from Step 4 (1-10)',
-    example: 9.4,
-    minimum: 1,
-    maximum: 10,
-  })
-  aiRecommendationScore?: number;
-
-  @ApiPropertyOptional({
-    description: 'AI analysis and recommendation reasoning from Step 4',
-    example:
-      '대중교통 접근성이 우수하고, 두 지역에서 균등하게 접근 가능합니다.',
-  })
-  aiAnalysis?: string;
 
   // Enhanced Google Places API data fields
   @ApiPropertyOptional({
@@ -317,7 +316,7 @@ export class PlaceDto {
   };
 
   @ApiPropertyOptional({
-    description: 'Place photos from Google Places',
+    description: 'Place photos from Google Places with usable URLs',
     type: 'array',
     items: {
       type: 'object',
@@ -325,6 +324,11 @@ export class PlaceDto {
         photoReference: { type: 'string' },
         height: { type: 'number' },
         width: { type: 'number' },
+        url: {
+          type: 'string',
+          example:
+            'https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photo_reference=...&key=...',
+        },
       },
     },
   })
@@ -332,26 +336,7 @@ export class PlaceDto {
     photoReference: string;
     height: number;
     width: number;
-  }>;
-
-  @ApiPropertyOptional({
-    description: 'Recent reviews from Google Places (up to 5)',
-    type: 'array',
-    items: {
-      type: 'object',
-      properties: {
-        authorName: { type: 'string', example: '김철수' },
-        rating: { type: 'number', example: 5 },
-        text: { type: 'string', example: '음식이 정말 맛있어요!' },
-        time: { type: 'number', example: 1640995200 },
-      },
-    },
-  })
-  reviews?: Array<{
-    authorName: string;
-    rating: number;
-    text: string;
-    time: number;
+    url: string;
   }>;
 }
 

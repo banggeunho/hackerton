@@ -10,6 +10,7 @@ import {
   NaverSearchService,
 } from './naver-search.service';
 import { GoogleMapsService } from './google-maps.service';
+import { LocationService } from './location.service';
 
 /**
  * Places service implementing Steps 2-4 of the 4-step algorithm
@@ -26,6 +27,7 @@ export class PlacesService {
     private readonly bedrockService: BedrockService,
     private readonly naverSearchService: NaverSearchService,
     private readonly googleMapsService: GoogleMapsService,
+    private readonly locationService: LocationService,
     private configService: ConfigService<AllConfigType>,
   ) {
     const kakaoConfig = this.configService.get('kakao', { infer: true })!;
@@ -234,7 +236,21 @@ export class PlacesService {
    평점: ${place.rating || 'N/A'} (${place.userRatingsTotal || 0}개 리뷰)
    중심점에서 거리: ${place.distanceFromCenter}m
    대중교통 평균 시간: ${transit?.averageTransitTime || 'N/A'}
-   접근성 점수: ${transit?.accessibilityScore || 'N/A'}/10`;
+   접근성 점수: ${transit?.accessibilityScore || 'N/A'}/10
+   대중교통 계산 방식: ${transit?.calculationMethod === 'google_maps_api' ? 'Google Maps 실제 데이터' : '추정치'}`;
+
+          // Add detailed transit times from each individual address
+          if (transit?.fromAddresses && transit.fromAddresses.length > 0) {
+            context += `
+   📍 각 주소별 대중교통 시간:`;
+            transit.fromAddresses.forEach((transitInfo, idx) => {
+              context += `
+      ${idx + 1}. ${transitInfo.origin} → ${transitInfo.transitTime} (${transitInfo.transitDistance})`;
+              if (transitInfo.durationSeconds) {
+                context += ` [실제: ${Math.round(transitInfo.durationSeconds / 60)}분]`;
+              }
+            });
+          }
 
           // Add Google Places enhanced data
           if (place.businessStatus) {
@@ -256,10 +272,7 @@ export class PlacesService {
             context += `\n   현재 운영: ${place.openingHours.openNow ? '영업중' : '영업시간 외'}`;
           }
 
-          if (place.reviews && place.reviews.length > 0) {
-            const recentReview = place.reviews[0];
-            context += `\n   최근 리뷰: "${recentReview.text?.substring(0, 50)}..." (★${recentReview.rating})`;
-          }
+          // Reviews are no longer included in the response
 
           if (place.photos && place.photos.length > 0) {
             context += `\n   사진: ${place.photos.length}개 이용가능`;
@@ -269,11 +282,11 @@ export class PlacesService {
         })
         .join('\n\n');
 
-      const systemPrompt = `당신은 구글 플레이스 데이터와 대중교통 접근성을 종합 분석하는 한국의 장소 추천 전문가입니다.
-풍부한 장소 정보를 활용하여 사용자에게 최적의 장소를 추천하세요.
+      const systemPrompt = `당신은 구글 플레이스 데이터와 Google Maps 실제 대중교통 정보를 종합 분석하는 한국의 장소 추천 전문가입니다.
+실제 대중교통 이동시간과 풍부한 장소 정보를 활용하여 사용자에게 최적의 장소를 추천하세요.
 
 추천 분석 기준:
-1. 대중교통 접근성 (평균 이동 시간과 접근성 점수)
+1. **각 주소별 실제 대중교통 접근성**: 입력된 모든 주소에서의 개별 이동시간과 전체 평균 접근성 점수
 2. 장소 품질 (평점, 리뷰 수, 최근 리뷰 내용)
 3. 운영 상태 (현재 영업 여부, 영업시간)
 4. 가격 접근성 (가격대 정보)
@@ -281,8 +294,13 @@ export class PlacesService {
 6. 사용자 선호사항과의 부합도
 7. 실제 이용객 후기 (리뷰 품질과 내용)
 
-구글 플레이스에서 제공하는 상세 정보 (영업상태, 가격대, 현재 운영시간, 리뷰, 사진 등)를 
-적극 활용하여 실용적이고 정확한 추천을 제공하세요.
+**핵심 분석 포인트**:
+- '📍 각 주소별 대중교통 시간' 섹션을 중점적으로 분석하세요
+- 모든 주소에서 균등하게 접근 가능한 곳을 우선 추천하세요
+- 특정 주소에서만 접근이 어려운 곳은 해당 사유를 명시하세요
+- 대중교통 계산 방식이 'Google Maps 실제 데이터'인 경우, 실제 버스/지하철 노선과 시간표를 반영한 정확한 이동시간이므로 더 높은 신뢰도로 평가하세요
+
+구글 플레이스에서 제공하는 상세 정보와 각 주소별 실제 대중교통 이동시간을 종합하여 실용적이고 정확한 추천을 제공하세요.
 
 응답은 JSON 배열 형식으로 해주세요:
 [
@@ -314,15 +332,18 @@ export class PlacesService {
 
 최대 ${maxResults}개까지 추천하고 점수가 높은 순으로 정렬해주세요.`;
 
-      const userPrompt = `원본 주소: ${originalAddresses.join(', ')}
-중심 좌표: ${centerCoordinates.lat}, ${centerCoordinates.lng}
-장소 유형: ${placeType}
-사용자 선호사항: ${preferences || '특별한 선호사항 없음'}
+      const userPrompt = `**분석 요청**:
+📍 입력받은 주소들: ${originalAddresses.map((addr, idx) => `${idx + 1}. ${addr}`).join(', ')}
+🎯 중심 좌표: ${centerCoordinates.lat}, ${centerCoordinates.lng}
+🏷️ 장소 유형: ${placeType}
+💭 사용자 선호사항: ${preferences || '특별한 선호사항 없음'}
 
-분석할 장소들:
+**중요**: 아래 장소들의 "📍 각 주소별 대중교통 시간" 정보를 통해 ${originalAddresses.length}개 주소에서 모두 접근하기 좋은 곳을 우선적으로 추천해주세요.
+
+**분석할 장소들**:
 ${placesContext}
 
-위 데이터를 종합적으로 분석하여 최적의 장소를 추천해주세요.`;
+위 데이터를 종합적으로 분석하여 모든 입력 주소에서 접근하기 좋은 최적의 장소를 추천해주세요.`;
 
       this.logger.debug('Requesting AI recommendations with enhanced context');
       this.logger.debug(`System Prompt: ${systemPrompt}`);
@@ -651,12 +672,26 @@ ${placesContext}
     }
 
     try {
-      // Convert addresses to coordinates (reuse geocoding logic if needed)
-      const originCoordinates = originalAddresses.map(() => {
-        // For simplicity, we'll use the first place's coordinates as reference
-        // In a full implementation, you'd geocode each address
-        return places[0]?.coordinates || { lat: 37.5665, lng: 126.978 };
-      });
+      // Convert addresses to coordinates using LocationService
+      const geocodedAddresses = await Promise.all(
+        originalAddresses.map(async (address) => {
+          try {
+            // Use the existing geocoding functionality from LocationService
+            const results = await this.locationService.geocodeAddresses([
+              address,
+            ]);
+            if (results && results.length > 0) {
+              return results[0].coordinates;
+            }
+            // Fallback to default Seoul coordinates if geocoding fails
+            return { lat: 37.5665, lng: 126.978 };
+          } catch (error) {
+            this.logger.warn(`Failed to geocode address: ${address}`, error);
+            return { lat: 37.5665, lng: 126.978 };
+          }
+        }),
+      );
+      const originCoordinates = geocodedAddresses;
 
       // Calculate transit distances for each place
       const enhancedPlaces = await Promise.all(
@@ -684,7 +719,7 @@ ${placesContext}
   }
 
   /**
-   * Calculate transit information for a single place
+   * Calculate real transit information for a single place using Google Maps
    */
   private async calculateTransitToPlace(
     origins: CoordinateDto[],
@@ -692,40 +727,92 @@ ${placesContext}
     place: PlaceDto,
   ): Promise<any> {
     try {
-      console.log(
-        await this.googleMapsService.calculateDistanceBetweenCoordinates(
-          place.coordinates,
-          origins,
-        ),
+      this.logger.debug(
+        `Calculating real transit times from ${origins.length} origins to ${place.name}`,
       );
 
-      // Simplified transit calculation
-      const transitTimes = origins.map((origin, index) => {
-        return {
-          origin: originalAddresses[index],
-          transitTime: Math.round(15 + Math.random() * 20) + '분', // Simplified mock
-          transitDistance:
+      // Calculate transit times using Google Maps API
+      const transitResults = await Promise.all(
+        origins.map(async (origin) => {
+          try {
+            const results = await this.googleMapsService.calculateTransitTime(
+              origin,
+              [place.coordinates],
+            );
+            return results[0]; // First (and only) result for this origin-destination pair
+          } catch (error) {
+            this.logger.warn(
+              `Failed to calculate transit time from ${origin.lat},${origin.lng} to ${place.name}`,
+              error,
+            );
+            return null;
+          }
+        }),
+      );
+
+      // Process results and create transit information
+      const transitTimes = transitResults.map((result, index) => {
+        if (result && result.durationSeconds > 0) {
+          return {
+            origin: originalAddresses[index],
+            transitTime: result.durationText,
+            transitDistance: result.distanceText,
+            transitMode: '대중교통',
+            durationSeconds: result.durationSeconds,
+            distanceMeters: result.distanceMeters,
+          };
+        } else {
+          // Fallback to simplified calculation if Google Maps fails
+          const fallbackTime = Math.round(15 + Math.random() * 20);
+          const fallbackDistance =
             Math.round(
-              this.calculateDistance(origin, place.coordinates) / 100,
-            ) /
-              10 +
-            'km',
-          transitMode: '지하철 + 도보',
-        };
+              this.calculateDistance(origins[index], place.coordinates) / 100,
+            ) / 10;
+          return {
+            origin: originalAddresses[index],
+            transitTime: fallbackTime + '분',
+            transitDistance: fallbackDistance + 'km',
+            transitMode: '대중교통 (추정)',
+            durationSeconds: fallbackTime * 60,
+            distanceMeters: fallbackDistance * 1000,
+          };
+        }
       });
 
-      const averageTime = Math.round(
-        transitTimes.reduce((sum, t) => sum + parseInt(t.transitTime), 0) /
-          transitTimes.length,
+      // Calculate average transit time
+      const averageSeconds =
+        transitTimes.reduce((sum, t) => sum + t.durationSeconds, 0) /
+        transitTimes.length;
+      const averageMinutes = Math.round(averageSeconds / 60);
+
+      // Calculate accessibility score based on transit time
+      // Score: 10 for ≤15min, decreasing by 1 for every 5min increase
+      const accessibilityScore = Math.min(
+        10,
+        Math.max(1, 10 - Math.floor((averageMinutes - 15) / 5)),
       );
 
-      return {
-        averageTransitTime: averageTime + '분',
-        accessibilityScore: Math.min(10, Math.max(1, 10 - averageTime / 5)),
+      const transitInfo = {
+        averageTransitTime: averageMinutes + '분',
+        accessibilityScore,
         fromAddresses: transitTimes,
+        calculationMethod: transitResults.some(
+          (r) => r && r.durationSeconds > 0,
+        )
+          ? 'google_maps_api'
+          : 'estimated',
       };
+
+      this.logger.debug(
+        `Transit calculation completed for ${place.name}: ${averageMinutes}분 (score: ${accessibilityScore})`,
+      );
+
+      return transitInfo;
     } catch (error) {
-      this.logger.warn('Failed to calculate transit for place', error);
+      this.logger.warn(
+        `Failed to calculate transit for place ${place.name}`,
+        error,
+      );
       return null;
     }
   }

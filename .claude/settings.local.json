@@ -31,7 +31,9 @@
       "Bash(chmod:*)",
       "Bash(npm run dev:*)",
       "WebSearch",
-      "Bash(npm run lint:*)"
+      "Bash(npm run lint:*)",
+      "mcp__serena__write_memory",
+      "Bash(node:*)"
     ],
     "deny": [],
     "ask": []
